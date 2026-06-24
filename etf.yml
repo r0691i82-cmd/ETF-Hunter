@@ -1,0 +1,28 @@
+name: ETF-Hunter Auto Pilot
+
+on:
+  schedule:
+    # UTC 00:00 = 한국 시간(KST) 오전 09:00 정각에 매일 자동 가동
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 필요할 때 깃허브 웹사이트에서 수동으로 [실행] 버튼을 누를 수 있게 만드는 옵션
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 저장소 코드 체크아웃
+      uses: actions/checkout@v3
+
+    - name: 파이썬 3.10 환경 세팅
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 필수 퀀트 라이브러리 자동 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: ETF Hunter 퀀트 코어 엔진 가동
+      run: python etf.py
