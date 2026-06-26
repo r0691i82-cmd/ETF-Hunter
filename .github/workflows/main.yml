@@ -35,5 +35,5 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add vault/ 01_Daily/ 04_ETF/ 07_Journal/ 08_Backtest/
+          git add .
           git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 [Auto Pilot] 금일 시장 국면 분석 및 Dataview 마크다운 DB 갱신 (${{ github.run_number }})" && git push)
