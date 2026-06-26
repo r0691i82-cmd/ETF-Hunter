@@ -2,20 +2,23 @@ name: ETF-Hunter Auto Pilot
 
 on:
   schedule:
-    # KST(한국 시간) 매일 아침 09:00 정각에 자동으로 가동 (UTC 00:00)
+    # KST(한국 시간) 매일 아침 09:00 정각 (UTC 00:00)
     - cron: '0 0 * * *'
-  workflow_dispatch: # 필요한 경우 깃허브 웹사이트에서 수동으로 [Run workflow]를 누를 수 있도록 허용
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # GitHub Actions에서 Git Push를 하기 위한 권한 설정
+    permissions:
+      contents: write
 
     steps:
       - name: 저장소 코드 체크아웃
-        uses: actions/checkout@v4     # v3 → v4 로 업데이트
+        uses: actions/checkout@v4
 
       - name: 파이썬 3.10 환경 세팅
-        uses: actions/setup-python@v5   # v4 → v5 로 업데이트
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -31,9 +34,16 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python etf.py
 
-      - name: 옵시디언 Dataview 마크다운 결과물 깃허브에 자동 기록
+      - name: 결과물 깃허브에 자동 기록
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add .
-          git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 [Auto Pilot] 금일 시장 국면 분석 및 Dataview 마크다운 DB 갱신 (${{ github.run_number }})" && git push)
+          
+          # 파일이 생성된 폴더들만 명시적으로 추가
+          git add Daily/*.md ETF/*.md Journal/*.md Backtest/*.md || echo "추가할 파일 없음"
+          
+          # 변경 사항이 있을 때만 커밋
+          git commit -m "[Auto Pilot] 자동 업데이트" || echo "변경 사항 없음"
+          
+          # 원격 저장소로 푸시
+          git push
