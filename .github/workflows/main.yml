@@ -12,10 +12,10 @@ jobs:
 
     steps:
       - name: 저장소 코드 체크아웃
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4     # v3 → v4 로 업데이트
 
       - name: 파이썬 3.10 환경 세팅
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5   # v4 → v5 로 업데이트
         with:
           python-version: '3.10'
 
