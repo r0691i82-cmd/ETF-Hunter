@@ -11,7 +11,7 @@ import requests
 # ==============================================================================
 # 환경 변수에 BASE_VAULT_PATH가 정의되어 있지 않다면 현재 코드가 있는 곳에 'vault' 폴더를 생성하여 사용합니다.
 # 로컬 테스트 시 특정 위치를 강제하고 싶다면 r"D:\ETF-Hunter\vault" 형태로 적으셔도 됩니다.
-BASE_VAULT_PATH = os.getenv("BASE_VAULT_PATH", os.path.join(os.getcwd(), "vault"))
+BASE_VAULT_PATH = os.getenv("BASE_VAULT_PATH", os.getcwd())  # vault 없이 바로 생성
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID")
@@ -20,7 +20,7 @@ if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY":
     genai.configure(api_key=GEMINI_API_KEY)
 
 # 설계도 기반 폴더 트리 자동 보장 (가상환경 에러 원천 차단)
-folders = ["01_Daily", "02_Weekly", "03_Monthly", "04_ETF", "05_Macro", "06_SmartMoney", "07_Journal", "08_Backtest"]
+folders = ["Daily", "Weekly", "Monthly", "ETF", "Macro", "SmartMoney", "Journal", "Backtest"]
 for f in folders:
     os.makedirs(os.path.join(BASE_VAULT_PATH, f), exist_ok=True)
 
