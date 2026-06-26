@@ -18,6 +18,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID")
 if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY":
     genai.configure(api_key=GEMINI_API_KEY)
 
+# Obsidian 폴더 구조
 folders = ["Daily", "Weekly", "Monthly", "ETF", "Macro", "SmartMoney", "Journal", "Backtest"]
 for f in folders:
     os.makedirs(os.path.join(BASE_VAULT_PATH, f), exist_ok=True)
@@ -36,7 +37,7 @@ print("=========================================================================
 today_str = datetime.today().strftime('%Y-%m-%d')
 all_tickers = etfs + list(macros.values()) + list(smart_money.values())
 
-raw = yfinance.download(all_tickers, period="1y", auto_adjust=True)
+raw = yf.download(all_tickers, period="1y", auto_adjust=True)
 close_data = raw["Close"].ffill()
 volume_data = raw["Volume"].ffill() if "Volume" in raw else pd.DataFrame(index=raw.index, columns=all_tickers).fillna(1)
 
@@ -163,7 +164,7 @@ else:
     print("⚠️ GEMINI_API_KEY가 설정되지 않았습니다.")
 
 # ==============================================================================
-# 3. 백테스트 & 파일 저장 (나머지 부분 동일)
+# 3. 백테스트 성과 트래킹
 # ==============================================================================
 print("▶ [BACKTEST] 7일 / 30일 시차 성과 추적 데이터 가공 중...")
 bt_file = os.path.join(BASE_VAULT_PATH, "Backtest", "backtest_history.csv")
@@ -201,7 +202,104 @@ new_bt_row = pd.DataFrame([{"Date": today_str, "Ticker": top_etf, "Entry_Price":
 df_bt = pd.concat([df_bt, new_bt_row]).drop_duplicates(subset=["Date"], keep="last").reset_index(drop=True)
 df_bt.to_csv(bt_file, index=False)
 
-# Daily, ETF, Journal, Backtest 저장 부분은 이전 코드와 동일하게 유지 (생략했으나 필요시 이전 버전 참조)
+# ==============================================================================
+# 4. Obsidian 파일 저장
+# ==============================================================================
+print("▶ [DB 저장] 파일 분할 적재 중...")
+
+# Daily 보고서
+daily_meta = f"""---
+type: daily
+date: {today_str}
+regime: {market_regime}
+fear: {fear_score:.2f}
+carry_risk: {carry_risk:.2f}
+top_pick: {top_etf}
+permission: {permission_grade}
+score: {total_score}
+---
+# {today_str} 데일리 리포트
+
+## 📊 퀀트 스크리닝 순위
+"""
+for idx, row in df_etf.iterrows():
+    daily_meta += f"- {idx}위: [[{row['Ticker']}]] (종가: ${row['Close']} | RS: {row['RS']} | 압축: {row['Compression']})\n"
+
+with open(os.path.join(BASE_VAULT_PATH, "Daily", f"{today_str}.md"), "w", encoding="utf-8") as f:
+    f.write(daily_meta)
+
+# ETF 누적 지표
+for idx, row in df_etf.iterrows():
+    f_path = os.path.join(BASE_VAULT_PATH, "ETF", f"{row['Ticker']}.md")
+    new_yaml_block = f"""---
+ticker: {row['Ticker']}
+score: {total_score if row['Ticker'] == top_etf else 0}
+fear: {int(fear_score)}
+permission: {permission_grade if row['Ticker'] == top_etf else 'N/A'}
+date: {today_str}
+price: {row['Close']}
+---
+"""
+    existing_content = ""
+    if os.path.exists(f_path):
+        with open(f_path, "r", encoding="utf-8") as f:
+            existing_content = f.read()
+            if existing_content.startswith("---"):
+                parts = existing_content.split("---", 2)
+                if len(parts) >= 3:
+                    existing_content = parts[2].strip()
+    if not existing_content:
+        existing_content = f"\n# {row['Ticker']} 리서치 DB\n\n## 📈 누적 기술적 지표\n| 날짜 | 종가 | RS점수 | 압축점수 |\n| :--- | :--- | :--- | :--- |\n"
+    updated_content = new_yaml_block + existing_content + f"| {today_str} | ${row['Close']} | {row['RS']} | {row['Compression']} |\n"
+    with open(f_path, "w", encoding="utf-8") as f:
+        f.write(updated_content)
+
+# Journal
+journal_meta = f"""---
+type: journal
+date: {today_str}
+top_pick: {top_etf}
+---
+# 🧠 매크로 CIO 투자판단 저널 ({today_str})
+
+{ai_decision}
+"""
+with open(os.path.join(BASE_VAULT_PATH, "Journal", f"{today_str}.md"), "w", encoding="utf-8") as f:
+    f.write(journal_meta)
+
+# Backtest Dashboard
+bt_markdown = f"""# 📉 퀀트 타임프레임 성과 추적기
+*업데이트: {today_str}*
+
+| 추천일 | 자산군 | 진입가 | 7일후 성과 | 30일후 성과 |
+| :---: | :---: | :---: | :---: | :---: |
+"""
+for _, row in df_bt.tail(10).iloc[::-1].iterrows():
+    ret_7 = f"{row['Return_7d(%)']}%" if not pd.isna(row.get('Return_7d(%)')) else "⏳ 대기중"
+    ret_30 = f"{row['Return_30d(%)']}%" if not pd.isna(row.get('Return_30d(%)')) else "⏳ 대기중"
+    bt_markdown += f"| {row['Date']} | **[[{row['Ticker']}]]** | ${row['Entry_Price']} | {ret_7} | {ret_30} |\n"
+
+with open(os.path.join(BASE_VAULT_PATH, "Backtest", "Performance_Dashboard.md"), "w", encoding="utf-8") as f:
+    f.write(bt_markdown)
+
+# ==============================================================================
+# 5. Telegram 전송
+# ==============================================================================
+if TELEGRAM_TOKEN and TELEGRAM_TOKEN != "YOUR_TELEGRAM_BOT_TOKEN":
+    tg_message = f"""🔔 [ETF-HUNTER Dual-Gemini] {today_str} 시그널
+📊 [시장 국면]
+- Regime: {market_regime}
+- Fear: {fear_score:.1f} / Carry: {carry_risk:.1f}
+- 주도 자산: {top_etf} (등급: {permission_grade} / 점수: {total_score}점)
+⚖️ [Gemini 페르소나 상호 교차검증 리포트]
+{ai_decision[:650]}...
+"""
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": tg_message})
+        print("[성공] 텔레그램 송신 완료")
+    except Exception as e:
+        print(f"텔레그램 전송 실패: {e}")
 
 print("==============================================================================")
 print(" [완료] Gemini 상호 검증 ➡️ Dataview 파싱 규격 저장 완료")
