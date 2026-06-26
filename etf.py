@@ -89,13 +89,31 @@ ai_decision = "AI 분석 미이행 (API 키 없음)"
 permission_grade = "B"
 total_score = 80
 
+# Gemini 모델 초기화 부분을 이렇게 바꾸세요
 if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY":
-    try:
+    GEMINI_API_KEY = GEMINI_API_KEY.strip()   # 앞뒤 공백 제거 (중요!)
+    
+    print(f"✅ Gemini API Key 감지됨 (길이: {len(GEMINI_API_KEY)})")
+    genai.configure(api_key=GEMINI_API_KEY)
+    
+    # 모델 선택 (2026년 기준 안정적인 순서)
+    model = None
+    for model_name in ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite']:
         try:
-            model = genai.GenerativeModel('gemini-2.5-flash')
-            model.generate_content("test")
-        except:
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel(model_name)
+            # 간단한 테스트 호출
+            test_response = model.generate_content("Say hello in one word.")
+            print(f"✅ 모델 로드 성공: {model_name}")
+            break
+        except Exception as e:
+            print(f"⚠️ {model_name} 실패: {str(e)[:100]}...")
+            continue
+    
+    if model is None:
+        print("❌ 모든 Gemini 모델 로드 실패")
+        ai_decision = "Gemini 모델 초기화 실패"
+else:
+    print("⚠️ GEMINI_API_KEY가 설정되지 않았습니다.")
             
         data_summary = f"""
         - 시장국면 변수: Regime={market_regime}, Fear Score={fear_score:.2f}, Carry Risk={carry_risk:.2f}
