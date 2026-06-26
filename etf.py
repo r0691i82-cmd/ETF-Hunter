@@ -89,73 +89,82 @@ ai_decision = "AI 분석 미이행 (API 키 없음)"
 permission_grade = "B"
 total_score = 80
 
-# Gemini 모델 초기화 부분을 이렇게 바꾸세요
 if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY":
-    GEMINI_API_KEY = GEMINI_API_KEY.strip()   # 앞뒤 공백 제거 (중요!)
-    
+    GEMINI_API_KEY = GEMINI_API_KEY.strip()
     print(f"✅ Gemini API Key 감지됨 (길이: {len(GEMINI_API_KEY)})")
     genai.configure(api_key=GEMINI_API_KEY)
-    
-    # 모델 선택 (2026년 기준 안정적인 순서)
+
+    # 모델 선택 및 테스트
     model = None
     for model_name in ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite']:
         try:
             model = genai.GenerativeModel(model_name)
-            # 간단한 테스트 호출
             test_response = model.generate_content("Say hello in one word.")
             print(f"✅ 모델 로드 성공: {model_name}")
             break
         except Exception as e:
             print(f"⚠️ {model_name} 실패: {str(e)[:100]}...")
             continue
-    
+
     if model is None:
         print("❌ 모든 Gemini 모델 로드 실패")
         ai_decision = "Gemini 모델 초기화 실패"
+    else:
+        try:
+            # 데이터 요약
+            data_summary = f"""
+- 시장국면 변수: Regime={market_regime}, Fear Score={fear_score:.2f}, Carry Risk={carry_risk:.2f}
+- 매크로 데이터: DXY={close_data.get('DX-Y.NYB', pd.Series([0])).iloc[-1]:.2f}, VIX={vix_latest:.2f}, USDJPY={usdjpy_series.iloc[-1]:.2f}
+- ETF 퀀트 랭킹판:
+{df_etf.to_string()}
+"""
+
+            print("▶ [AI 검증 1단계] 주 분석가 의견 수집 중...")
+            p1 = f"당신은 헤지펀드 주 분석가입니다. 데이터를 보고 오늘 진입할 원탑 ETF인 {top_etf}의 매수 강점 위주로 의견을 작성하세요.\n{data_summary}"
+            ans1 = model.generate_content(p1).text
+
+            print("▶ [AI 검증 2단계] 리스크 관리관 반론 수집 중...")
+            p2 = f"당신은 리스크 매니저입니다. 주 분석가의 다음 추천 의견과 매크로 지표의 맹점을 찔러 강하게 반론하세요.\n[추천의견]:\n{ans1}\n[데이터]:\n{data_summary}"
+            ans2 = model.generate_content(p2).text
+
+            print("▶ [AI 검증 3단계] 수석 CIO 엔진 최종 종합 의사결정 중...")
+            p3 = f"""당신은 글로벌 매크로 헤지펀드 수석 CIO입니다. 주 분석가의 낙관론과 리스크 관리관의 비관론을 종합하여 최종 결론 리포트를 마크다운으로 출력하십시오.
+
+[주 분석가]:
+{ans1}
+
+[리스크 관리관 반론]:
+{ans2}
+
+[필수 출력 서식 규격]
+### 1 시장국면
+### 2 스마트머니 흐름
+### 3 ETF 랭킹
+### 4 매수허가등급
+- **추천 티커**: {top_etf}
+- **허가 등급**: [A / B / C 선택]
+- **종합 점수**: [90점 만점 기준 숫자만]
+### 5 리스크
+### 6 단기전망
+### 7 중기전망
+### 8 장기전망
+"""
+            response = model.generate_content(p3)
+            ai_decision = response.text
+
+            # 허가 등급과 점수 파싱
+            if "허가 등급" in ai_decision:
+                try:
+                    permission_grade = ai_decision.split("허가 등급**:")[1].split("\n")[0].strip()[:1]
+                    total_score = int(''.join(filter(str.isdigit, ai_decision.split("종합 점수**:")[1].split("\n")[0])))
+                except:
+                    pass
+
+        except Exception as e:
+            print(f"❌ Gemini 분석 중 오류: {str(e)}")
+            ai_decision = f"검증 엔진 연산 오류: {str(e)}"
 else:
     print("⚠️ GEMINI_API_KEY가 설정되지 않았습니다.")
-            
-        data_summary = f"""
-        - 시장국면 변수: Regime={market_regime}, Fear Score={fear_score:.2f}, Carry Risk={carry_risk:.2f}
-        - 매크로 데이터: DXY={close_data['DX-Y.NYB'].iloc[-1]:.2f}, VIX={vix_latest:.2f}, USDJPY={usdjpy_series.iloc[-1]:.2f}
-        - ETF 퀀트 랭킹판:\n{df_etf.to_string()}
-        """
-        
-        print("▶ [AI 검증 1단계] 주 분석가 의견 수집 중...")
-        p1 = f"당신은 헤지펀드 주 분석가입니다. 데이터를 보고 오늘 진입할 원탑 ETF인 {top_etf}의 매수 강점 위주로 의견을 작성하세요.\n{data_summary}"
-        ans1 = model.generate_content(p1).text
-        
-        print("▶ [AI 검증 2단계] 리스크 관리관 반론 수집 중...")
-        p2 = f"당신은 리스크 매니저입니다. 주 분석가의 다음 추천 의견과 매크로 지표의 맹점을 찔러 강하게 반론하세요.\n[추천의견]:\n{ans1}\n[데이터]:\n{data_summary}"
-        ans2 = model.generate_content(p2).text
-        
-        print("▶ [AI 검증 3단계] 수석 CIO 엔진 최종 종합 의사결정 중...")
-        p3 = f"""당신은 글로벌 매크로 헤지펀드 수석 CIO입니다. 주 분석가의 낙관론과 리스크 관리관의 비관론을 종합하여 최종 결론 리포트를 마크다운으로 출력하십시오.
-        \n[주 분석가]:\n{ans1}\n\n[리스크 관리관 반론]:\n{ans2}\n
-        [필수 출력 서식 규격]
-        ### 1 시장국면
-        ### 2 스마트머니 흐름
-        ### 3 ETF 랭킹
-        ### 4 매수허가등급
-        - **추천 티커**: {top_etf}
-        - **허가 등급**: [A / B / C 선택]
-        - **종합 점수**: [90점 만점 기준 숫자만]
-        ### 5 리스크
-        ### 6 단기전망
-        ### 7 중기전망
-        ### 8 장기전망
-        """
-        response = model.generate_content(prompt=p3)
-        ai_decision = response.text
-        
-        if "허가 등급" in ai_decision:
-            try:
-                permission_grade = ai_decision.split("허가 등급**:")[1].split("\n")[0].strip()[:1]
-                total_score = int(''.join(filter(str.isdigit, ai_decision.split("종합 점수**:")[1].split("\n")[0])))
-            except: 
-                pass
-    except Exception as e:
-        ai_decision = f"검증 엔진 연산 오류: {str(e)}"
 
 # ==============================================================================
 # 3. 백테스트 성과 트래킹 엔진
