@@ -1,103 +1,67 @@
 import os
 import yfinance as yf
 import pandas as pd
-import numpy as np
-import google.generativeai as genai
 from datetime import datetime
-import requests
-import json
+import google.generativeai as genai
 
-# ==============================================================================
-# [설정 및 초기화]
-# ==============================================================================
+# [설정] 경로와 API 키
 BASE_VAULT_PATH = os.getenv("BASE_VAULT_PATH", os.getcwd())
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID")
 
-if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY":
+def get_data():
+    # 데이터 수집 (매크로 + ETF)
+    tickers = ["AIQ", "BOTZ", "PAVE", "SMH", "SOXX", "DX-Y.NYB", "^VIX", "JPY=X", "^TNX"]
+    raw = yf.download(tickers, period="3mo", auto_adjust=True)["Close"].ffill()
+    
+    # 지표 계산
+    res = {}
+    for t in ["AIQ", "BOTZ", "PAVE", "SMH", "SOXX"]:
+        p = raw[t]
+        res[t] = {"종가": round(p.iloc[-1], 2), "RS": round(((p.iloc[-1]-p.iloc[-60])/p.iloc[-60])*100, 2)}
+    
+    macro = {
+        "DXY": round(raw["DX-Y.NYB"].iloc[-1], 2),
+        "VIX": round(raw["^VIX"].iloc[-1], 2),
+        "USDJPY": round(raw["JPY=X"].iloc[-1], 2),
+        "10Y_Yield": round(raw["^TNX"].iloc[-1], 2)
+    }
+    return pd.DataFrame(res).T.sort_values("RS", ascending=False), macro
+
+def get_ai_analysis(df, macro):
+    if GEMINI_API_KEY == "YOUR_GEMINI_API_KEY": return "⚠️ API Key 미설정으로 AI 분석 불가"
     genai.configure(api_key=GEMINI_API_KEY)
-
-folders = ["Daily", "ETF", "Journal", "Backtest"]
-for f in folders:
-    os.makedirs(os.path.join(BASE_VAULT_PATH, f), exist_ok=True)
-
-# ==============================================================================
-# 1. 데이터 수집 및 엔진 구동
-# ==============================================================================
-def get_market_data():
-    etfs = ["AIQ", "BOTZ", "SMH", "SOXX", "PAVE"]
-    macros = {"DXY": "DX-Y.NYB", "VIX": "^VIX", "USDJPY": "JPY=X", "TNX": "^TNX"}
-    all_tickers = etfs + list(macros.values())
-    
-    raw = yf.download(all_tickers, period="3mo", auto_adjust=True)
-    close = raw["Close"].ffill()
-    
-    # 엔진 계산
-    data = {}
-    for t in etfs:
-        p = close[t]
-        ema20 = p.ewm(span=20, adjust=False).mean().iloc[-1]
-        rs = ((p.iloc[-1] - p.iloc[-60]) / p.iloc[-60] * 0.7 + (p.iloc[-1] - p.iloc[-20]) / p.iloc[-20] * 0.3) * 100
-        data[t] = {"Close": round(p.iloc[-1], 2), "RS": round(rs, 2), "EMA20": round(ema20, 2)}
-        
-    return data, close
-
-market_data, close_df = get_market_data()
-df_etf = pd.DataFrame(market_data).T.sort_values(by="RS", ascending=False)
-top_etf = df_etf.index[0]
-
-# ==============================================================================
-# 2. Gemini 통합 분석
-# ==============================================================================
-def run_cio_engine(market_data, close_df):
     model = genai.GenerativeModel('gemini-1.5-flash')
     
-    prompt = f"""
-    당신은 글로벌 매크로 헤지펀드 CIO입니다. 다음 데이터를 바탕으로 전문적인 리포트를 마크다운 형식으로 작성하세요.
-    
-    [데이터]
-    - 시장 상태: {market_data}
-    - 매크로 지표: DXY={close_df['DX-Y.NYB'].iloc[-1]:.2f}, VIX={close_df['^VIX'].iloc[-1]:.2f}
-    
-    [출력 요구사항]
-    1. 시장국면 (Risk On/Off 판정)
-    2. ETF 랭킹 및 상세 기술적 분석
-    3. 추천 티커 및 매수허가등급 (A/B/C)
-    4. 오늘 행동 및 리스크 요인
-    """
-    response = model.generate_content(prompt)
-    return response.text
+    prompt = f"매크로 데이터({macro})와 ETF 랭킹({df.to_string()})을 분석하여 시장 국면, 스마트머니 흐름, 투자 전략을 마크다운으로 상세히 작성해줘."
+    try:
+        return model.generate_content(prompt).text
+    except Exception as e:
+        return f"⚠️ AI 분석 일시 오류: {str(e)}"
 
-ai_report = run_cio_engine(market_data, close_df)
+# 실행 로직
+df, macro = get_data()
+ai_text = get_ai_analysis(df, macro)
+today = datetime.today().strftime('%Y-%m-%d')
 
-# ==============================================================================
-# 3. 통합 파일 저장 (Daily)
-# ==============================================================================
-today_str = datetime.today().strftime('%Y-%m-%d')
-file_path = os.path.join(BASE_VAULT_PATH, "Daily", f"{today_str}.md")
-
-final_content = f"""---
-date: {today_str}
-top_pick: {top_etf}
+# 파일 저장 (01_Daily 폴더에 통합)
+content = f"""---
+date: {today}
+type: daily
 ---
-# {today_str} 데일리 통합 리포트
+# {today} 통합 매크로 리포트
 
-## 🧠 CIO 종합 분석
-{ai_report}
+## 🌐 시장 환경 및 매크로
+{pd.DataFrame([macro]).to_markdown(index=False)}
 
-## 📊 기술적 퀀트 데이터
-{df_etf.to_markdown()}
+## 🧠 CIO 종합 전략 (AI)
+{ai_text}
+
+## 📊 ETF 퀀트 랭킹
+{df.to_markdown()}
 """
 
-with open(file_path, "w", encoding="utf-8") as f:
-    f.write(final_content)
+save_path = os.path.join(BASE_VAULT_PATH, "01_Daily", f"{today}.md")
+with open(save_path, "w", encoding="utf-8") as f:
+    f.write(content)
 
-print(f"✅ 통합 리포트 저장 완료: {file_path}")
-
-# ==============================================================================
-# 4. Telegram 전송
-# ==============================================================================
-if TELEGRAM_TOKEN != "YOUR_TELEGRAM_BOT_TOKEN":
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": f"🔔 {today_str} 리포트 생성 완료. 옵시디언을 확인하세요."})
+print(f"✅ 리포트 생성 완료: {save_path}")
